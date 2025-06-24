@@ -23,17 +23,24 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Auth, MongoDB, and User Management Setup ---
-GITHUB_CLIENT_ID = "Ov23li6cAni1XoTa0UGR"
-GITHUB_CLIENT_SECRET =  "9e8b52cc184f48c1a9fa0d9ea396ecf816d1bcac"
-MONGODB_URL = "mongodb://localhost:27017/"
+GITHUB_CLIENT_ID = "Ov23lil3GJnxUlBLqdeT"
+GITHUB_CLIENT_SECRET =  "ceb4e1e0020b84e0bb908c0d47203c31a8399d95"
+MONGODB_URL = "mongodb+srv://ali:alialeem@cluster0.xfcz2.mongodb.net/"
 SECRET_KEY = "secret"
 DATABASE_NAME = "devops_automation"
 GITHUB_REDIRECT_URI = "http://localhost:8000/github-auth"
+
+# # VM Configuration
+# VM_HOST = "192.168.18.60"
+# VM_USERNAME = "virk"
+# VM_PASSWORD = "alialeem"
+
 
 # VM Configuration
 VM_HOST = "15.235.184.251"
 VM_USERNAME = "moz"
 VM_PASSWORD = "sqeh3u8QWAAP"
+
 
 app = FastAPI(title="Deployment Pipeline API", version="1.0.0")
 
