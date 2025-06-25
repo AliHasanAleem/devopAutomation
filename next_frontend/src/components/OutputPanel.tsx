@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from "react";
 import { PipelineStep } from '../types';
 import { Terminal, Copy, Download } from 'lucide-react';
 
@@ -7,6 +7,29 @@ interface OutputPanelProps {
 }
 
 const OutputPanel: React.FC<OutputPanelProps> = ({ step }) => {
+  const [summary, setSummary] = useState<any>(null);
+  useEffect(() => {
+    const fetchSummary = async () => {
+      try {
+        const res = await fetch("/api/pipeline/summary");
+        console.log("thi is the response",res);
+        const data = await res.json();
+        console.log("thi is the data",data);
+
+        if(data!=null){
+          console.log("data is not null",data);
+          setSummary(data);
+        }
+        setSummary(data);
+      } catch (e) {
+        setSummary("wait handling the error");
+      }
+    };
+    fetchSummary();
+    const interval = setInterval(fetchSummary, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
   const copyToClipboard = () => {
     if (step?.output) {
       navigator.clipboard.writeText(step.output);
@@ -85,6 +108,78 @@ const OutputPanel: React.FC<OutputPanelProps> = ({ step }) => {
             </div>
           </div>
         )}
+
+        <div className="mt-4">
+          <h2 className="text-lg font-bold mb-2">Deployment Summary</h2>
+          {summary ? (
+            <>
+              <div className="mb-2 flex flex-wrap gap-4">
+                <div>Total Commands: <b>{summary.total_commands}</b></div>
+                <div>Succeeded: <b className="text-green-600">{summary.succeeded}</b> ({summary.percent_succeeded}%)</div>
+                <div>Failed: <b className="text-red-600">{summary.failed}</b> ({summary.percent_failed}%)</div>
+                <div>Skipped: <b className="text-yellow-600">{summary.skipped}</b> ({summary.percent_skipped}%)</div>
+              </div>
+              <div className="space-y-6">
+                {summary.steps && summary.steps.length > 0 ? (
+                  summary.steps.map((step: any, idx: number) => (
+                    <div key={step.id || idx} className="border rounded p-3 bg-gray-50">
+                      <div className="flex items-center gap-4 mb-2">
+                        <span className="font-semibold">{step.name}</span>
+                        <span className={
+                          step.status === "completed" ? "text-green-600" :
+                          step.status === "failed" ? "text-red-600" :
+                          step.status === "skipped" ? "text-yellow-600" :
+                          "text-gray-500"
+                        }>
+                          {step.status ? step.status.charAt(0).toUpperCase() + step.status.slice(1) : "Pending"}
+                        </span>
+                        {step.error && <span className="ml-2 text-xs text-red-600">Error: {step.error}</span>}
+                      </div>
+                      <div className="mb-1 text-xs text-gray-600">Duration: {step.duration ?? 0}s</div>
+                      {step.output && <div className="mb-2 text-xs text-gray-700 whitespace-pre-wrap">{step.output}</div>}
+                      {step.commands && step.commands.length > 0 ? (
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-xs border">
+                            <thead>
+                              <tr className="bg-gray-100">
+                                <th className="px-2 py-1 border">#</th>
+                                <th className="px-2 py-1 border">Command</th>
+                                <th className="px-2 py-1 border">Status</th>
+                                <th className="px-2 py-1 border">Output</th>
+                                <th className="px-2 py-1 border">Error</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {step.commands.map((cmd: any, cidx: number) => (
+                                <tr key={cidx} className={
+                                  cmd.status === "success" ? "bg-green-50" :
+                                  cmd.status === "failed" ? "bg-red-50" :
+                                  cmd.status === "skipped" ? "bg-yellow-50" : ""
+                                }>
+                                  <td className="border px-2 py-1">{cidx + 1}</td>
+                                  <td className="border px-2 py-1 font-mono whitespace-pre-wrap max-w-xs break-all">{cmd.command}</td>
+                                  <td className="border px-2 py-1">{cmd.status}</td>
+                                  <td className="border px-2 py-1 whitespace-pre-wrap max-w-xs break-all">{cmd.output}</td>
+                                  <td className="border px-2 py-1 text-red-600 whitespace-pre-wrap max-w-xs break-all">{cmd.error}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="text-gray-500 text-xs">No commands for this step yet.</div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-gray-500 text-xs">No step details available yet.</div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="text-gray-500">Loading summary...</div>
+          )}
+        </div>
       </div>
     </div>
   );

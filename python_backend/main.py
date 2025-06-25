@@ -23,24 +23,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Auth, MongoDB, and User Management Setup ---
-GITHUB_CLIENT_ID = "Ov23lil3GJnxUlBLqdeT"
-GITHUB_CLIENT_SECRET =  "ceb4e1e0020b84e0bb908c0d47203c31a8399d95"
-MONGODB_URL = "mongodb+srv://ali:alialeem@cluster0.xfcz2.mongodb.net/"
+GITHUB_CLIENT_ID = "Ov23li6cAni1XoTa0UGR"
+GITHUB_CLIENT_SECRET =  "9e8b52cc184f48c1a9fa0d9ea396ecf816d1bcac"
+MONGODB_URL = "mongodb://localhost:27017/"
 SECRET_KEY = "secret"
 DATABASE_NAME = "devops_automation"
 GITHUB_REDIRECT_URI = "http://localhost:8000/github-auth"
-
-# # VM Configuration
-# VM_HOST = "192.168.18.60"
-# VM_USERNAME = "virk"
-# VM_PASSWORD = "alialeem"
-
 
 # VM Configuration
 VM_HOST = "15.235.184.251"
 VM_USERNAME = "moz"
 VM_PASSWORD = "sqeh3u8QWAAP"
-
 
 app = FastAPI(title="Deployment Pipeline API", version="1.0.0")
 
@@ -226,6 +219,61 @@ PIPELINE_STEPS = [
 
 # Pipeline context
 pipeline_context = {}
+
+# --- Deployment Summary Tracking (REWRITE) ---
+deployment_summary = {
+    "steps": [
+        {"id": "init", "name": "Repository Analysis", "status": "pending", "output": "", "error": None, "commands": [], "duration": 0},
+        {"id": "dockerfile", "name": "Dockerfile Generation", "status": "pending", "output": "", "error": None, "commands": [], "duration": 0},
+        {"id": "vm_access", "name": "VM Connection & Setup", "status": "pending", "output": "", "error": None, "commands": [], "duration": 0},
+        {"id": "build", "name": "Docker Build", "status": "pending", "output": "", "error": None, "commands": [], "duration": 0},
+        {"id": "deploy", "name": "Deployment", "status": "pending", "output": "", "error": None, "commands": [], "duration": 0}
+    ]
+}
+
+def reset_deployment_summary():
+    global deployment_summary
+    deployment_summary = {
+        "steps": [
+            {"id": "init", "name": "Repository Analysis", "status": "pending", "output": "", "error": None, "commands": [], "duration": 0},
+            {"id": "dockerfile", "name": "Dockerfile Generation", "status": "pending", "output": "", "error": None, "commands": [], "duration": 0},
+            {"id": "vm_access", "name": "VM Connection & Setup", "status": "pending", "output": "", "error": None, "commands": [], "duration": 0},
+            {"id": "build", "name": "Docker Build", "status": "pending", "output": "", "error": None, "commands": [], "duration": 0},
+            {"id": "deploy", "name": "Deployment", "status": "pending", "output": "", "error": None, "commands": [], "duration": 0}
+        ]
+    }
+
+def record_step_summary(idx, status, output, error, commands, duration):
+    global deployment_summary
+    deployment_summary["steps"][idx]["status"] = status
+    deployment_summary["steps"][idx]["output"] = output
+    deployment_summary["steps"][idx]["error"] = error
+    deployment_summary["steps"][idx]["commands"] = commands
+    deployment_summary["steps"][idx]["duration"] = duration
+
+def run_and_log_command(ssh, command, context=None, skip=False):
+    status = "skipped" if skip else "success"
+    output = error = ""
+    try:
+        if skip:
+            output = "Command skipped."
+        else:
+            stdin, stdout, stderr = ssh.exec_command(command)
+            output = stdout.read().decode().strip()
+            error = stderr.read().decode().strip()
+            if error:
+                status = "failed"
+    except Exception as e:
+        error = str(e)
+        status = "failed"
+    entry = {
+        "command": command,
+        "output": output,
+        "error": error,
+        "status": status,
+        "context": context or ""
+    }
+    return output, error, status
 
 async def log_message(message: str, level: str = "INFO"):
     """Send log message to all connected clients"""
@@ -815,63 +863,203 @@ async def deploy_application(owner: str, repo_name: str) -> str:
         return error_msg
 
 async def execute_pipeline():
-    """Execute the deployment pipeline with real-time logging"""
-    global PIPELINE_STEPS, pipeline_context
-    
+    """Execute the deployment pipeline with real-time logging and detailed command tracking"""
+    global PIPELINE_STEPS, pipeline_context, deployment_summary
+    reset_deployment_summary()
     owner = pipeline_context.get('owner')
     repo_name = pipeline_context.get('repo_name')
-    
+    build_failed = False
     if not owner or not repo_name:
         await log_message("Missing repository information", "ERROR")
         return
-    
     await log_message(f"Starting pipeline execution for {owner}/{repo_name}")
-    
     for i, step in enumerate(PIPELINE_STEPS):
         step["status"] = "running"
         step["output"] = ""
         await manager.broadcast_step_update(step)
-        
         start_time = time.time()
-        
+        step_summary = deployment_summary["steps"][i]
+        step_summary["status"] = "running"
+        step_summary["output"] = ""
+        step_summary["error"] = None
+        step_summary["commands"] = []
         try:
+            if step["id"] == "deploy" and build_failed:
+                step["status"] = "skipped"
+                step_summary["status"] = "skipped"
+                step_summary["error"] = "Build step failed. Deployment skipped."
+                step_summary["output"] = "Build step failed. Deployment skipped."
+                step["output"] = "Build step failed. Deployment skipped."
+                step["duration"] = 0
+                step_summary["duration"] = 0
+                step_summary["commands"].append({
+                    "command": "deploy",
+                    "output": "Build step failed. Deployment skipped.",
+                    "error": "Build step failed.",
+                    "status": "skipped"
+                })
+                await manager.broadcast_step_update(step)
+                continue
             if step["id"] == "init":
                 await log_message("Step 1: Repository Analysis")
                 step["output"] = await analyze_repo_structure(owner, repo_name)
-                await asyncio.sleep(1)
-                
+                step_summary["commands"].append({
+                    "command": "analyze_repo_structure",
+                    "output": step["output"],
+                    "error": None,
+                    "status": "success"
+                })
             elif step["id"] == "dockerfile":
                 await log_message("Step 2: Dockerfile Generation")
                 step["output"] = await generate_dockerfile(owner, repo_name)
-                await asyncio.sleep(1)
-                
+                step_summary["commands"].append({
+                    "command": "generate_dockerfile",
+                    "output": step["output"],
+                    "error": None,
+                    "status": "success"
+                })
             elif step["id"] == "vm_access":
                 await log_message("Step 3: VM Connection & Setup")
-                step["output"] = await connect_to_vm()
-                await asyncio.sleep(1)
-                
+                # Track each command run in connect_to_vm
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                await log_message(f"Establishing SSH connection to {VM_HOST}")
+                ssh.connect(hostname=VM_HOST, username=VM_USERNAME, password=VM_PASSWORD, timeout=10)
+                commands = [
+                    ("docker --version", "docker_version"),
+                    ("docker info", "docker_info"),
+                    ("free -h", "memory_info"),
+                    ("df -h", "disk_space"),
+                    ("docker images", "docker_images"),
+                    ("docker ps", "docker_ps")
+                ]
+                all_outputs = []
+                for cmd, name in commands:
+                    try:
+                        await log_message(f"Running: {cmd}")
+                        stdin, stdout, stderr = ssh.exec_command(cmd)
+                        output = stdout.read().decode().strip()
+                        error = stderr.read().decode().strip()
+                        status = "success" if not error else "failed"
+                        step_summary["commands"].append({
+                            "command": cmd,
+                            "output": output,
+                            "error": error if error else None,
+                            "status": status
+                        })
+                        if output:
+                            all_outputs.append(f"$ {cmd}\n{output}\n")
+                        if error:
+                            all_outputs.append(f"[ERROR] {error}\n")
+                    except Exception as cmd_error:
+                        step_summary["commands"].append({
+                            "command": cmd,
+                            "output": "",
+                            "error": str(cmd_error),
+                            "status": "failed"
+                        })
+                        all_outputs.append(f"[FAILED] {cmd}: {cmd_error}\n")
+                ssh.close()
+                step["output"] = "".join(all_outputs)
             elif step["id"] == "build":
                 await log_message("Step 4: Docker Build")
-                step["output"] = await build_docker_image(owner, repo_name)
-                await asyncio.sleep(1)
-                
+                # Track build commands
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh.connect(hostname=VM_HOST, username=VM_USERNAME, password=VM_PASSWORD, timeout=10)
+                project_dir = f"/home/{VM_USERNAME}/{owner.lower()}-{repo_name.lower()}"
+                image_name = f"{owner.lower()}-{repo_name.lower()}"
+                cmds = [
+                    f"mkdir -p {project_dir}",
+                    f"cd {project_dir} && git clone https://github.com/{owner}/{repo_name}.git .",
+                    f"cd {project_dir} && ls -la Dockerfile",
+                    f"cd {project_dir} && docker build -t {image_name}:latest ."
+                ]
+                all_outputs = []
+                for cmd in cmds:
+                    try:
+                        await log_message(f"Running: {cmd}")
+                        stdin, stdout, stderr = ssh.exec_command(cmd)
+                        output = stdout.read().decode().strip()
+                        error = stderr.read().decode().strip()
+                        status = "success" if not error else "failed"
+                        step_summary["commands"].append({
+                            "command": cmd,
+                            "output": output,
+                            "error": error if error else None,
+                            "status": status
+                        })
+                        if output:
+                            all_outputs.append(f"$ {cmd}\n{output}\n")
+                        if error:
+                            all_outputs.append(f"[ERROR] {error}\n")
+                    except Exception as cmd_error:
+                        step_summary["commands"].append({
+                            "command": cmd,
+                            "output": "",
+                            "error": str(cmd_error),
+                            "status": "failed"
+                        })
+                        all_outputs.append(f"[FAILED] {cmd}: {cmd_error}\n")
+                ssh.close()
+                step["output"] = "".join(all_outputs)
             elif step["id"] == "deploy":
                 await log_message("Step 5: Application Deployment")
-                step["output"] = await deploy_application(owner, repo_name)
-                await asyncio.sleep(1)
-            
+                # Track deploy commands
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh.connect(hostname=VM_HOST, username=VM_USERNAME, password=VM_PASSWORD, timeout=10)
+                image_name = f"{owner.lower()}-{repo_name.lower()}"
+                container_name = f"{owner.lower()}-{repo_name.lower()}-container"
+                deploy_cmds = [
+                    f"docker stop {container_name} || true",
+                    f"docker rm {container_name} || true",
+                    f"docker images {image_name}:latest",
+                    f"docker run -d --name {container_name} -p 8080:8080 {image_name}:latest",
+                    f"docker ps --filter name={container_name}",
+                    f"docker logs {container_name} --tail 10"
+                ]
+                all_outputs = []
+                for cmd in deploy_cmds:
+                    try:
+                        await log_message(f"Running: {cmd}")
+                        stdin, stdout, stderr = ssh.exec_command(cmd)
+                        output = stdout.read().decode().strip()
+                        error = stderr.read().decode().strip()
+                        status = "success" if not error else "failed"
+                        step_summary["commands"].append({
+                            "command": cmd,
+                            "output": output,
+                            "error": error if error else None,
+                            "status": status
+                        })
+                        if output:
+                            all_outputs.append(f"$ {cmd}\n{output}\n")
+                        if error:
+                            all_outputs.append(f"[ERROR] {error}\n")
+                    except Exception as cmd_error:
+                        step_summary["commands"].append({
+                            "command": cmd,
+                            "output": "",
+                            "error": str(cmd_error),
+                            "status": "failed"
+                        })
+                        all_outputs.append(f"[FAILED] {cmd}: {cmd_error}\n")
+                ssh.close()
+                step["output"] = "".join(all_outputs)
             step["status"] = "completed"
-            step["duration"] = int(time.time() - start_time)
-            await log_message(f"Step {i+1} completed in {step['duration']} seconds")
-            
+            step_summary["status"] = "completed"
         except Exception as e:
             step["status"] = "failed"
             step["output"] = f"Error: {str(e)}"
-            await log_message(f"Step {i+1} failed: {str(e)}", "ERROR")
-        
+            step_summary["status"] = "failed"
+            step_summary["error"] = str(e)
+            if step["id"] == "build":
+                build_failed = True
+        step["duration"] = int(time.time() - start_time)
+        step_summary["output"] = step["output"]
+        step_summary["duration"] = step["duration"]
         await manager.broadcast_step_update(step)
-        await asyncio.sleep(0.5)
-    
     await log_message("Pipeline execution completed")
 
 @app.get("/api/pipeline/step/{step_id}")
@@ -1135,6 +1323,36 @@ async def logged_out():
         </body>
     </html>
     """
+
+@app.get("/api/pipeline/summary")
+async def get_pipeline_summary():
+    global deployment_summary
+    # Flatten all commands from all steps
+    all_commands = []
+    for step in deployment_summary["steps"]:
+        for cmd in step.get("commands", []):
+            all_commands.append(cmd)
+    total_commands = len(all_commands)
+    succeeded = sum(1 for cmd in all_commands if cmd.get("status") == "success")
+    failed = sum(1 for cmd in all_commands if cmd.get("status") == "failed")
+    skipped = sum(1 for cmd in all_commands if cmd.get("status") == "skipped")
+    percent_succeeded = round((succeeded / total_commands) * 100, 2) if total_commands else 0
+    percent_failed = round((failed / total_commands) * 100, 2) if total_commands else 0
+    percent_skipped = round((skipped / total_commands) * 100, 2) if total_commands else 0
+    # Also count step-level status for completeness
+    step_statuses = [step.get("status") for step in deployment_summary["steps"]]
+    # Compose the summary object
+    summary = {
+        "total_commands": total_commands,
+        "succeeded": succeeded,
+        "failed": failed,
+        "skipped": skipped,
+        "percent_succeeded": percent_succeeded,
+        "percent_failed": percent_failed,
+        "percent_skipped": percent_skipped,
+        "steps": deployment_summary["steps"]
+    }
+    return summary
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
